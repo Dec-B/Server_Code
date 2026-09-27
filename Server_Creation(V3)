@@ -8,7 +8,7 @@ using System.Runtime.Serialization.Formatters.Binary;
 
 namespace Server_Creation
 {
-    // The Packet class | Gets the raw data and information, keeps as a object rather than bytes. 
+    // Gets the raw data and information, keeps as a object rather than bytes. 
     internal class Packet
     {
         public byte[] Data { get; private set; }
