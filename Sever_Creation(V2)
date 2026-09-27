@@ -1,0 +1,120 @@
+using System;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Collections.Generic;
+using System.IO;
+using System.Runtime.Serialization.Formatters.Binary;
+
+namespace Server_Creation
+{
+    // Gets the raw data and information, keeps as a object rather than bytes. 
+    internal class Packet
+    {
+        public byte[] Data { get; private set; }
+        public int Length { get; private set; }
+        public EndPoint Sender { get; private set; }
+
+        public Packet(byte[] data, int length, EndPoint sender)
+        {
+            Data = data;
+            Length = length;
+            Sender = sender;
+        }
+
+        // Truns byte array into a string 
+        public string GetMessageString()
+        {
+            return Encoding.ASCII.GetString(Data, 0, Length);
+        }
+    }
+
+    internal class Server
+    {
+        private Socket serverSocket;
+        private IPEndPoint endpoint;
+        private int bufferSize;
+        private string defaultReply;
+
+        // Sets up variables for server
+        public Server(string ipAddress, int port, int packetSize, string replyMessage)
+        {
+            // IP and Port | IPAddress.Parse converts string into a viable object (IP) for "IPEndPoint" to read, "127.0.0.1" is used as it is the localhost | 62115 is the port number I have chosen for this test build unsure of any potential clashes as "IANA" only appears to have a count up to 49151 registered.
+            IPAddress address = IPAddress.Parse(ipAddress);
+            endpoint = new IPEndPoint(address, port);
+
+            bufferSize = packetSize;
+            defaultReply = replyMessage;
+        }
+
+        // Prepares and opens the server socket.
+        public void Initialize()
+        {
+            serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            serverSocket.Blocking = false; // Unblocks Socket
+            serverSocket.Bind(endpoint);
+
+            Console.WriteLine("Server open...");
+        }
+
+        // Handles the listening
+        public void StartListening()
+        {
+            IPEndPoint sender = new IPEndPoint(IPAddress.Any, 0);
+            EndPoint remote = (EndPoint)(sender);
+
+            while (true)
+            {
+                try
+                {
+                    // Number to be adjusted, powers of 2 prefered, game would want smaller optimised packets. Must be within loop to reset at start.
+                    byte[] data = new byte[bufferSize];
+                    int recv = serverSocket.ReceiveFrom(data, ref remote);
+
+                    // Instance of packet to contain data
+                    Packet receivedPacket = new Packet(data, recv, remote);
+
+                    // Keeps core loop clean
+                    ProcessPacket(receivedPacket);
+                    SendMessage(remote, defaultReply);
+                }
+                catch (SocketException ex) when (ex.SocketErrorCode == SocketError.WouldBlock)
+                {
+                   
+                }
+            }
+        }
+
+        // Organization stuff, neatly showcases information
+        private void ProcessPacket(Packet packet)
+        {
+            Console.WriteLine("Message Recived from " + packet.Sender.ToString());
+            Console.WriteLine(packet.GetMessageString());
+        }
+
+        private void SendMessage(EndPoint targetRemote, string messageText)
+        {
+            // Convert to bytes before sending it across nmetwork
+            byte[] data = Encoding.ASCII.GetBytes(messageText);
+            serverSocket.SendTo(data, data.Length, SocketFlags.None, targetRemote);
+        }
+    }
+
+    internal class Program
+    {
+        static void Main(string[] args)
+        {
+            // Change everything from here, easy to locate.
+            string serverIP = "127.0.0.1";
+            int serverPort = 62115;
+            int maxPacketSize = 1024;
+            string welcomeMessage = "Message recieved by the Server - You have connected!";
+
+            // Creates an Instance of the server with all the correct variables.
+            Server myServer = new Server(serverIP, serverPort, maxPacketSize, welcomeMessage);
+
+            myServer.Initialize();
+            myServer.StartListening();
+        }
+    }
+}
