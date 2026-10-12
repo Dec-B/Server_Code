@@ -1,0 +1,193 @@
+using System;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Collections.Generic;
+using System.IO;
+using System.Runtime.Serialization.Formatters.Binary;
+
+namespace Server_Creation
+{
+    // Gets the raw data and information, keeps as a object rather than bytes. 
+    internal class Packet
+    {
+        public byte[] Data { get; private set; }
+        public int Length { get; private set; }
+        public EndPoint Sender { get; private set; }
+
+        public Packet(byte[] data, int length, EndPoint sender)
+        {
+            Data = data;
+            Length = length;
+            Sender = sender;
+        }
+
+        // Truns byte array into a string 
+        public string GetMessageString()
+        {
+            return Encoding.ASCII.GetString(Data, 0, Length);
+        }
+    }
+
+    internal class Server
+    {
+        private Socket serverSocket;
+        private IPEndPoint endpoint;
+        private int bufferSize;
+        private string defaultReply;
+
+        private Dictionary<int, string> gameState;
+        private List<IPEndPoint> connectedClients;
+
+        // Sets up variables for server
+        public Server(string ipAddress, int port, int packetSize, string replyMessage)
+        {
+            // IP and Port | IPAddress.Parse converts string into a viable object (IP) for "IPEndPoint" to read, "127.0.0.1" is used as it is the localhost | 62115 is the port number I have chosen for this test build unsure of any potential clashes as "IANA" only appears to have a count up to 49151 registered.
+            IPAddress address = IPAddress.Parse(ipAddress);
+            endpoint = new IPEndPoint(address, port);
+
+            bufferSize = packetSize;
+            defaultReply = replyMessage;
+
+            gameState = new Dictionary<int, string>();
+            connectedClients = new List<IPEndPoint>();
+        }
+
+        // Prepares and opens the server socket.
+        public void Initialize()
+        {
+            serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            serverSocket.Blocking = false; // Unblocks Socket
+            serverSocket.Bind(endpoint);
+
+            Console.WriteLine("Server open...");
+        }
+
+        // Handles the listening
+        public void StartListening()
+        {
+            IPEndPoint sender = new IPEndPoint(IPAddress.Any, 0);
+            EndPoint remote = (EndPoint)(sender);
+
+            while (true)
+            {
+                try
+                {
+                    byte[] data = new byte[bufferSize];
+                    int recv = serverSocket.ReceiveFrom(data, ref remote);
+
+                    // Instance of packet to contain data
+                    Packet receivedPacket = new Packet(data, recv, remote);
+
+                    IPEndPoint clientEndPoint = remote as IPEndPoint;
+                    if (clientEndPoint != null && !connectedClients.Contains(clientEndPoint))
+                    {
+                        connectedClients.Add(clientEndPoint);
+                        Console.WriteLine($"A new client connected! There are currently {connectedClients.Count} connected.");
+                    }
+
+                    // Keeps core loop clean
+                    ProcessPacket(receivedPacket);
+
+                    foreach (IPEndPoint client in connectedClients)
+                    {
+                        foreach (var kvp in gameState)
+                        {
+                            SendMessage(client, kvp.Value);
+                        }
+                    }
+                }
+                catch (SocketException ex)
+                {
+
+                }
+            }
+        }
+
+        // Organization stuff, neatly showcases information
+        private void ProcessPacket(Packet packet)
+        {
+            string message = packet.GetMessageString();
+
+            // Global ID stuff.
+            if (message.StartsWith("I need a UID for local object"))
+            {
+                string[] splitData = message.Split(':');
+                string secondPart = splitData[1];
+
+                Console.WriteLine(message);
+                /* Console.WriteLine(splitData[0]);
+                Console.WriteLine(secondPart); */
+
+                int localID = int.Parse(secondPart);
+                int assignedGlobalID = Program.lastAssignedGlobalID;
+
+                string responseMessage = $"Assigned UID:{localID}:{assignedGlobalID}";
+                Console.WriteLine($"Response: Assigned UID:{localID};{assignedGlobalID}");
+                Console.WriteLine($"Sending Assigned UID:{localID};{assignedGlobalID} to " + packet.Sender);
+                Console.WriteLine("------------------------");
+
+                SendMessage(packet.Sender, responseMessage);
+
+                Program.lastAssignedGlobalID++;
+            }
+            else if (message.StartsWith("TransformData"))
+            {
+                string[] splitData = message.Split(';');
+                int globalID = int.Parse(splitData[1]);
+
+                if (gameState.ContainsKey(globalID))
+                {
+                    gameState[globalID] = message;
+                }
+                else
+                {
+                    gameState.Add(globalID, message);
+                }
+
+                Console.WriteLine(message);
+                Console.WriteLine($"Amount of objects in the game state: {gameState.Count}");
+            }
+            else
+            {
+                Console.WriteLine("Message Recived from " + packet.Sender.ToString());
+                Console.WriteLine(message);
+
+                SendMessage(packet.Sender, defaultReply);
+            }
+        }
+
+        private void SendMessage(EndPoint targetRemote, string messageText)
+        {
+            try
+            {
+                byte[] data = Encoding.ASCII.GetBytes(messageText);
+                serverSocket.SendTo(data, data.Length, SocketFlags.None, targetRemote);
+            }
+            catch (SocketException)
+            {
+
+            }
+        }
+    }
+
+    internal class Program
+    {
+        public static int lastAssignedGlobalID = 100;
+
+        static void Main(string[] args)
+        {
+            // Change everything from here, easy to locate.
+            string serverIP = "127.0.0.1";
+            int serverPort = 62115;
+            int maxPacketSize = 1024;
+            string welcomeMessage = "Message recieved by the Server - You have connected!";
+
+            // Creates an Instance of the server with all the correct variables.
+            Server myServer = new Server(serverIP, serverPort, maxPacketSize, welcomeMessage);
+
+            myServer.Initialize();
+            myServer.StartListening();
+        }
+    }
+}
