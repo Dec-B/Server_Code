@@ -1,0 +1,371 @@
+using System;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Collections.Generic;
+using System.IO;
+using System.Runtime.Serialization.Formatters.Binary;
+using Microsoft.Data.Sqlite;
+using System.Diagnostics;
+
+namespace Server_Creation
+{
+    internal class Packet
+    {
+        public byte[] Data { get; private set; }
+        public int Length { get; private set; }
+        public EndPoint Sender { get; private set; }
+
+        public Packet(byte[] data, int length, EndPoint sender)
+        {
+            Data = data;
+            Length = length;
+            Sender = sender;
+        }
+
+        public string GetMessageString()
+        {
+            return Encoding.ASCII.GetString(Data, 0, Length);
+        }
+    }
+
+    internal class Server
+    {
+        private Socket serverSocket;
+        private IPEndPoint endpoint;
+        private int bufferSize;
+        private string defaultReply;
+
+        private Dictionary<int, string> gameState;
+        private List<IPEndPoint> connectedClients;
+
+        private Stopwatch timer;
+
+        public Server(string ipAddress, int port, int packetSize, string replyMessage)
+        {
+            IPAddress address = IPAddress.Parse(ipAddress);
+            endpoint = new IPEndPoint(address, port);
+
+            bufferSize = packetSize;
+            defaultReply = replyMessage;
+
+            gameState = new Dictionary<int, string>();
+            connectedClients = new List<IPEndPoint>();
+            timer = new Stopwatch();
+        }
+
+        public void Initialize()
+        {
+            serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            serverSocket.Blocking = false;
+            serverSocket.Bind(endpoint);
+
+            Console.WriteLine("Server open...");
+
+            // I intend to change these later as well student details are not game related,
+            // just using them as a temperory thing to follow instructions and ensure it all works
+            SqliteConnection conn = new SqliteConnection("Data Source=basicDatabase.db");
+            conn.Open();
+
+            SqliteCommand cmd = conn.CreateCommand();
+            cmd.CommandText =
+            @"
+                CREATE TABLE IF NOT EXISTS studentTable (
+                    studentID INTEGER PRIMARY KEY NOT NULL,
+                    firstName TEXT NOT NULL,
+                    surname TEXT
+                )
+            ";
+            cmd.ExecuteNonQuery();
+            // Creates the database if it doesnt already exist, sets up table formatting and such
+
+            // -------------------------------
+
+            try
+            {
+                SqliteCommand addCmd1 = conn.CreateCommand();
+                addCmd1.CommandText =
+                @"
+                    INSERT INTO 
+                        studentTable (studentID, firstName, surname)
+                        VALUES (@id, @first, @second)
+                ";
+                addCmd1.Parameters.Add(new SqliteParameter("@id", 22001919));
+                addCmd1.Parameters.Add(new SqliteParameter("@first", "Declan"));
+                addCmd1.Parameters.Add(new SqliteParameter("@second", "Burchell"));
+                addCmd1.ExecuteNonQuery();
+
+                SqliteCommand addCmd2 = conn.CreateCommand();
+                addCmd2.CommandText =
+                @"
+                    INSERT INTO 
+                        studentTable (studentID, firstName)
+                        VALUES (@studID, @firstName)
+                ";
+                addCmd2.Parameters.Add(new SqliteParameter("@studID", 6767));
+                addCmd2.Parameters.Add(new SqliteParameter("@firstName", "Lotte"));
+                addCmd2.ExecuteNonQuery();
+            }
+            catch (SqliteException)
+            {
+
+            }
+            // These create 2 sets of data to put onto table, adds  hence why it uses "INSERT INTO"
+
+            // -------------------------------
+
+            SqliteCommand editCmd = conn.CreateCommand();
+            editCmd.CommandText =
+            @"
+                UPDATE studentTable
+                SET firstName = @newName, surname = @newSurname
+                WHERE studentID = @id
+            ";
+            editCmd.Parameters.Add(new SqliteParameter("@newName", "Riley"));
+            editCmd.Parameters.Add(new SqliteParameter("@newSurname", "Yate"));
+            editCmd.Parameters.Add(new SqliteParameter("@id", 2211));
+            editCmd.ExecuteNonQuery();
+            // Updates existing data on the table if the ID matches, changing the names and such
+
+            // -------------------------------
+
+            SqliteCommand delCmd = conn.CreateCommand();
+            delCmd.CommandText =
+            @"
+                DELETE FROM studentTable
+                WHERE studentID = @id
+            ";
+            delCmd.Parameters.Add(new SqliteParameter("@id", 22001919));
+            delCmd.ExecuteNonQuery();
+            // Removes a record from the database if the ID matches hence why it uses "DELETE FROM"
+
+            // -------------------------------
+
+            SqliteCommand findAllCmd = conn.CreateCommand();
+            findAllCmd.CommandText =
+            @"
+                SELECT *
+                FROM studentTable
+            ";
+            SqliteDataReader reader = findAllCmd.ExecuteReader();
+
+            if (reader.HasRows)
+            {
+                while (reader.Read())
+                {
+                    int id = reader.GetInt32(0);
+                    string firstName = reader.GetString(1);
+
+                    string lastName = "";
+                    if (!reader.IsDBNull(2))
+                    {
+                        lastName = reader.GetString(2);
+                    }
+
+                    Console.WriteLine("Record - ID: " + id + " - " + firstName + " " + lastName);
+                }
+            }
+            reader.Close();
+            // Grabs all the records from the table and reads them, checking for null values so it doesnt crash
+
+            // -------------------------------
+
+            int searchID1 = 22001919;
+            SqliteCommand findIDCmd1 = conn.CreateCommand();
+            findIDCmd1.CommandText =
+            @"
+                SELECT *
+                FROM studentTable
+                WHERE studentID = @id
+            ";
+            findIDCmd1.Parameters.Add(new SqliteParameter("@id", searchID1));
+            SqliteDataReader findIDReader1 = findIDCmd1.ExecuteReader();
+
+            if (findIDReader1.HasRows)
+            {
+                while (findIDReader1.Read())
+                {
+                    int id = findIDReader1.GetInt32(0);
+                    string firstName = findIDReader1.GetString(1);
+
+                    string lastName = "";
+                    if (!findIDReader1.IsDBNull(2))
+                    {
+                        lastName = findIDReader1.GetString(2);
+                    }
+
+                    Console.WriteLine("Found Record - ID: " + id + " - " + firstName + " " + lastName);
+                }
+            }
+            else
+            {
+                Console.WriteLine("No records found for ID " + searchID1);
+            }
+            findIDReader1.Close();
+            // Searches for a specific ID in the table and prints it out if found, otherwise says no records found
+
+            // -------------------------------
+
+            int searchID2 = 6767;
+            SqliteCommand findIDCmd2 = conn.CreateCommand();
+            findIDCmd2.CommandText =
+            @"
+                SELECT *
+                FROM studentTable
+                WHERE studentID = @id
+            ";
+            findIDCmd2.Parameters.Add(new SqliteParameter("@id", searchID2));
+            SqliteDataReader findIDReader2 = findIDCmd2.ExecuteReader();
+
+            if (findIDReader2.HasRows)
+            {
+                while (findIDReader2.Read())
+                {
+                    int id = findIDReader2.GetInt32(0);
+                    string firstName = findIDReader2.GetString(1);
+
+                    string lastName = "";
+                    if (!findIDReader2.IsDBNull(2))
+                    {
+                        lastName = findIDReader2.GetString(2);
+                    }
+
+                    Console.WriteLine("Found Record - ID: " + id + " - " + firstName + " " + lastName);
+                }
+            }
+            else
+            {
+                Console.WriteLine("No records found for ID " + searchID2);
+            }
+            findIDReader2.Close();
+            // Does the exact same thing as above just searching for a different ID this time
+
+            // -------------------------------
+        }
+
+        public void StartListening()
+        {
+            IPEndPoint sender = new IPEndPoint(IPAddress.Any, 0);
+            EndPoint remote = (EndPoint)(sender);
+
+            timer.Start();
+
+            while (true)
+            {
+                try
+                {
+                    byte[] data = new byte[bufferSize];
+                    int recv = serverSocket.ReceiveFrom(data, ref remote);
+
+                    Packet receivedPacket = new Packet(data, recv, remote);
+
+                    IPEndPoint clientEndPoint = remote as IPEndPoint;
+                    if (clientEndPoint != null && !connectedClients.Contains(clientEndPoint))
+                    {
+                        connectedClients.Add(clientEndPoint);
+                        Console.WriteLine($"A new client connected! There are currently {connectedClients.Count} connected.");
+                    }
+
+                    ProcessPacket(receivedPacket);
+                }
+                catch (SocketException)
+                {
+
+                }
+
+                if (timer.ElapsedMilliseconds >= 1000)
+                {
+                    foreach (IPEndPoint client in connectedClients)
+                    {
+                        foreach (var kvp in gameState)
+                        {
+                            SendMessage(client, kvp.Value);
+                            Console.WriteLine($"Sending game state to {client} at {DateTime.Now.TimeOfDay}");
+                        }
+                    }
+                    timer.Restart();
+                }
+            }
+        }
+
+        private void ProcessPacket(Packet packet)
+        {
+            string message = packet.GetMessageString();
+
+            if (message.StartsWith("I need a UID for local object"))
+            {
+                string[] splitData = message.Split(':');
+                string secondPart = splitData[1];
+
+                Console.WriteLine(message);
+
+                int localID = int.Parse(secondPart);
+                int assignedGlobalID = Program.lastAssignedGlobalID;
+
+                string responseMessage = $"Assigned UID:{localID}:{assignedGlobalID}";
+                Console.WriteLine($"Response: Assigned UID:{localID};{assignedGlobalID}");
+                Console.WriteLine($"Sending Assigned UID:{localID};{assignedGlobalID} to " + packet.Sender);
+                Console.WriteLine("------------------------");
+
+                SendMessage(packet.Sender, responseMessage);
+
+                Program.lastAssignedGlobalID++;
+            }
+            else if (message.StartsWith("TransformData"))
+            {
+                string[] splitData = message.Split(';');
+                int globalID = int.Parse(splitData[1]);
+
+                if (gameState.ContainsKey(globalID))
+                {
+                    gameState[globalID] = message;
+                }
+                else
+                {
+                    gameState.Add(globalID, message);
+                }
+
+                Console.WriteLine(message);
+                Console.WriteLine($"Amount of objects in the game state: {gameState.Count}");
+            }
+            else
+            {
+                Console.WriteLine("Message Recived from " + packet.Sender.ToString());
+                Console.WriteLine(message);
+
+                SendMessage(packet.Sender, defaultReply);
+            }
+        }
+
+        private void SendMessage(EndPoint targetRemote, string messageText)
+        {
+            try
+            {
+                byte[] data = Encoding.ASCII.GetBytes(messageText);
+                serverSocket.SendTo(data, data.Length, SocketFlags.None, targetRemote);
+            }
+            catch (SocketException)
+            {
+
+            }
+        }
+    }
+
+    internal class Program
+    {
+        public static int lastAssignedGlobalID = 100;
+
+        static void Main(string[] args)
+        {
+            string serverIP = "127.0.0.1";
+            int serverPort = 62115;
+            int maxPacketSize = 1024;
+            string welcomeMessage = "Message recieved by the Server - You have connected!";
+
+            Server myServer = new Server(serverIP, serverPort, maxPacketSize, welcomeMessage);
+
+            myServer.Initialize();
+            myServer.StartListening();
+        }
+    }
+}
